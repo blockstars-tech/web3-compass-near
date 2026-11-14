@@ -1,0 +1,36 @@
+/*
+ * EXCERPT — NEAR parts only.
+ * The NEAR rules from each stylesheet, so NEAR results get the same badge,
+ * scope dot, dial tick and swatch as the other naming systems.
+ */
+
+/* tokens.css — badge and scope-dot colour */
+:root {
+  --ns-near: #3a4a66; /* same cool family; the free step between ENS and UNS */
+}
+
+/* base.css */
+[data-ns='NEAR'] {
+  --ns: var(--ns-near);
+}
+
+/* field.css — dial tick and legend swatch */
+.dt.ns-near line:first-child {
+  stroke: #5fa33a;
+}
+.ksw.ns-near {
+  background: #5fa33a;
+  box-shadow: none;
+}
+
+/* v2.css — dim the other systems when one is highlighted (NEAR line added) */
+.cov2[data-hl='UNS'] .dt:not(.ns-uns),
+.cov2[data-hl='ENS'] .dt:not(.ns-ens),
+.cov2[data-hl='TON'] .dt:not(.ns-ton),
+.cov2[data-hl='SNS'] .dt:not(.ns-sns),
+.cov2[data-hl='BNB'] .dt:not(.ns-bnb),
+.cov2[data-hl='TOMI'] .dt:not(.ns-tomi),
+.cov2[data-hl='NEAR'] .dt:not(.ns-near),
+.cov2[data-hl='none'] .dt:not(.ns-none) {
+  opacity: 0.12;
+}

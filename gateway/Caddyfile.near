@@ -1,0 +1,86 @@
+# EXCERPT — the part of the gateway Caddyfile that serves .near sites.
+# NestJS answers with X-Content-Location: <account>.near.page and
+# X-Content-Tls: true; this block then fetches the page over HTTPS.
+# The block is shared with Swarm/TON Storage — NEAR reuses it unchanged.
+
+&(dweb3-proxy) {
+	reverse_proxy localhost:3000 {
+		# … (keepalive and Host header settings omitted) …
+
+		# Second hop: NestJS returns X-Content-Location → proxy to that gateway.
+		# Split by gateway scheme (order matters — TLS branch first):
+		#   @proxy_tls — HTTPS gateways (Swarm, TON Storage), flagged X-Content-Tls
+		#   @proxy     — plain-HTTP gateways (IPFS node), the fallback
+		# TON ADNL responses carry no X-Content-Location (NestJS already streamed
+		# the body), so they pass straight through to the browser.
+		@proxy_tls {
+			status 200
+			header X-Content-Location *
+			header X-Content-Tls true
+		}
+		handle_response @proxy_tls {
+			# Dial :443 explicitly: the upstream is a runtime placeholder, so Caddy
+			# can't apply the TLS default port (it would attempt a handshake on
+			# :80 → 502). Host/SNI stay the bare hostname.
+			reverse_proxy {rp.header.X-Content-Location}:443 {
+				rewrite {rp.header.X-Content-Path}
+
+				header_up Host {rp.header.X-Content-Location}
+				header_up X-Id-Name {rp.header.X-Id-Name}
+				header_up X-Id-Cid {rp.header.X-Id-Cid}
+
+				# Strip identifying headers for privacy (eth.limo pattern)
+				header_up -X-Forwarded-For
+				header_up -X-Forwarded-Host
+				header_up -Referer
+				header_up -User-Agent
+
+				transport http {
+					tls
+					tls_server_name {rp.header.X-Content-Location}
+					dial_timeout 10s
+					# 60s (not 30s): a cold IPFS/Swarm fetch (DHT lookup + block
+					# retrieval) can exceed 30s on the first visit and still succeed;
+					# Cloudflare waits for origins up to ~100s.
+					response_header_timeout 60s
+				}
+
+				# Gateway dir redirects (no trailing slash) carry an INTERNAL
+				# Location like /ipfs/<cid>/dir/ — relaying it would strand the
+				# browser on a nonsense site path. The only legit case is the
+				# trailing-slash normalization, so redirect to the site's own
+				# original path + "/".
+				@redirect301 status 301
+				handle_response @redirect301 {
+					redir {http.request.orig_uri.path}/ permanent
+				}
+
+				# Upstream's own 502/504 → re-raise so handle_errors serves the
+				# branded page as 503 (Cloudflare intercepts pass-through 502/504).
+				@upstream_down status 502 504
+				handle_response @upstream_down {
+					error 502
+				}
+			}
+		}
+
+		# … (plain-HTTP @proxy branch for IPFS omitted) …
+	}
+}
+
+# Landing host: old path-style links (dweb3.wtf/awesomeweb4.near) redirect to
+# the subdomain form. `near` was added to this TLD list.
+http://*.*.dweb3.wtf:8000, http://*.dweb3.wtf:8000, http://:8000 {
+	# … (@landing matches the dweb3.wtf host) …
+	handle @landing {
+		# Legacy path-based URLs (dweb3.wtf/vitalik.eth) redirect to subdomain form.
+		# TLD list mirrors src/constants/domain.enum.ts — update both when adding a TLD.
+		@web3_redirect {
+			host dweb3.wtf www.dweb3.wtf
+			path_regexp web3 ^/([^/]+\.(888|ai4|ai|altimist|anime|arculus|austin|awaken|binanceus|bitcoin|bitget|blockchain|bnb|brave|calicoin|carbon|cashme|cgai|clay|coin|crypto|dao|dejay|derad|dfz|digitalfuture|doga|dsci|emir|eth|go|grow|hi|imtoken|klever|kresus|kryptic|lfg|ltc|manga|metropolis|miku|mobix|moi|moon|near|nft|nibi|now|openx|pbdx|pog|polygon|presearch|pudgy|pundi|raiin|realm|secret|shiksha|sol|stepn|supernova|tball|tea|tomi|ton|ubu|unknown|unstoppable|voto|wallet|web3|witg|wrkx|wtf|x|xmr|xz1|zil))(/.*)?$
+		}
+		redir @web3_redirect https://{re.web3.1}.dweb3.wtf{re.web3.3} permanent
+		# … (landing page proxy omitted) …
+	}
+	# …
+}
